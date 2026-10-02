@@ -1,7 +1,7 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
 -- Copyright (C) 2026 Shashin Halalingaiah
 
-local git = require("../nixos-dirty/lib/git")
+local git = require("../git-status/lib/git")
 local t = require("./testlib")
 
 local H = "f2ad6c76f0115a6ba5b00456a849810e7ec0af20"
@@ -115,6 +115,31 @@ end)
 t.test("firstLine skips blank lines", function()
     t.eq(git.firstLine("\n  \n  fatal: nope  \nmore"), "fatal: nope")
     t.eq(git.firstLine(nil), "")
+end)
+
+
+t.test("pullArgv is fast-forward only and non-interactive", function()
+    local a = git.pullArgv(PATHS, "/r")
+    t.eq(a[1], "/bin/env")
+    t.eq(table.find(a, "--ff-only") ~= nil, true)
+    t.eq(table.find(a, "--rebase"), nil)
+end)
+
+t.test("unpushedArgv compares against the upstream", function()
+    local a = git.unpushedArgv(PATHS, "/r")
+    t.eq(a[#a], "@{upstream}..HEAD")
+end)
+
+t.test("parseLog splits hash and subject", function()
+    t.deepEq(git.parseLog("abc1234 fix: a thing\ndef5678 \n"), {
+        { hash = "abc1234", subject = "fix: a thing" },
+        { hash = "def5678", subject = "" },
+    })
+    t.deepEq(git.parseLog(""), {})
+end)
+
+t.test("terminalCommand quotes the path", function()
+    t.eq(git.terminalCommand("/home/u/it's"), "cd '/home/u/it'\\''s' && exec \"${SHELL:-sh}\"")
 end)
 
 return nil

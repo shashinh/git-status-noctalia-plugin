@@ -1,10 +1,10 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
 -- Copyright (C) 2026 Shashin Halalingaiah
 
-local config = require("../nixos-dirty/lib/config")
-local core = require("../nixos-dirty/lib/service_core")
+local config = require("../git-status/lib/config")
+local core = require("../git-status/lib/service_core")
 local fake = require("./fake_noctalia")
-local git = require("../nixos-dirty/lib/git")
+local git = require("../git-status/lib/git")
 local t = require("./testlib")
 
 local PATHS = { git = "git", env = "env", inotifywait = "inotifywait" }
@@ -152,6 +152,49 @@ t.test("fetch request from the panel fetches when an upstream exists", function(
     host.complete("status", { stdout = CLEAN })
     host.state.set(core.KEYS.fetchReq, 1)
     t.eq(host.pending("fetch"), 1)
+end)
+
+
+t.test("title and repo path are published with every status", function()
+    local host = fake.new({ config = { repo_path = "/repo", title = "Repo" }, dirs = { ["/repo"] = true } })
+    core.start(host, { git = git, config = config, paths = PATHS })
+    t.eq(host.last().title, "Repo")
+    host.complete("status", { stdout = CLEAN })
+    t.eq(host.last().title, "Repo")
+    t.eq(host.last().repoPath, "/repo")
+end)
+
+t.test("when ahead, unpushed commits are listed before publishing", function()
+    local host = setup()
+    local n = #host.published
+    host.complete("status", { stdout = "# branch.oid abc\0# branch.head main\0# branch.upstream origin/main\0# branch.ab +2 -0\0" })
+    t.eq(#host.published, n) -- waits for the log
+    t.eq(host.pending("log"), 1)
+    host.complete("log", { stdout = "aaa111 second\nbbb222 first\n" })
+    local s = host.last()
+    t.eq(s.ahead, 2)
+    t.eq(#s.unpushed, 2)
+    t.eq(s.unpushed[1].subject, "second")
+end)
+
+t.test("a running status+log still coalesces refresh requests", function()
+    local host = setup()
+    host.complete("status", { stdout = "# branch.oid abc\0# branch.head main\0# branch.upstream origin/main\0# branch.ab +1 -0\0" })
+    host.state.set(core.KEYS.refreshReq, 1)
+    t.eq(host.pending("status"), 0) -- still busy with the log
+    host.complete("log", { stdout = "aaa111 x\n" })
+    t.eq(host.pending("status"), 1)
+end)
+
+t.test("successful fetch records fetchedAt", function()
+    local host, svc = setup()
+    host.complete("status", { stdout = CLEAN })
+    t.eq(host.last().fetchedAt, nil)
+    host.now += 5000
+    svc.tick()
+    host.complete("fetch", {})
+    host.complete("status", { stdout = CLEAN })
+    t.eq(host.last().fetchedAt, 5000)
 end)
 
 return nil

@@ -161,6 +161,41 @@ end
 
 -- --literal-pathspecs: file names are passed verbatim, so a name containing
 -- glob characters (`*`, `?`, `[`) or `:(magic)` never matches other files.
+-- Fast-forward only: never creates a merge commit or rebases; diverged
+-- histories fail with git's own message instead.
+function M.pullArgv(paths: { [string]: string }, repo: string): { string }
+    return concat(nonInteractive(paths), { paths.git, "-C", repo, "pull", "--ff-only", "--quiet" })
+end
+
+M.UNPUSHED_MAX = 20
+
+-- Local commits not yet on the upstream, newest first.
+function M.unpushedArgv(paths: { [string]: string }, repo: string): { string }
+    return {
+        paths.git, "-C", repo, "log", "--no-color", "--format=%h %s",
+        "-n", tostring(M.UNPUSHED_MAX), "@{upstream}..HEAD",
+    }
+end
+
+export type Commit = { hash: string, subject: string }
+
+function M.parseLog(out: string): { Commit }
+    local commits = {}
+    for line in string.gmatch(out, "[^\n]+") do
+        local hash, subject = string.match(line, "^(%S+) ?(.*)$")
+        if hash then
+            table.insert(commits, { hash = hash, subject = subject or "" })
+        end
+    end
+    return commits
+end
+
+-- Shell command for noctalia.runInTerminal (which only takes a string):
+-- an interactive shell in the repository.
+function M.terminalCommand(repo: string): string
+    return "cd " .. M.shellQuote(repo) .. ' && exec "${SHELL:-sh}"'
+end
+
 function M.addArgv(paths: { [string]: string }, repo: string, specs: { string }): { string }
     return concat({ paths.git, "--literal-pathspecs", "-C", repo, "add", "-A", "--" }, specs)
 end

@@ -2,17 +2,21 @@
 -- Copyright (C) 2026 Shashin Halalingaiah
 
 -- Popup: list uncommitted files (each with a checkbox and an inline diff),
--- commit the checked ones, and push after an inline confirmation.
--- Git state comes from the service via noctalia.state; this entry only runs
--- the commands the user asks for, then requests a refresh.
+-- commit the checked ones, and pull (fast-forward) or push after an inline
+-- confirmation. Git state comes from the service via noctalia.state; this
+-- entry only runs the commands the user asks for, then requests a refresh.
 
 local git = require("./lib/git.luau")
 local paths = require("./lib/paths.luau")
+local view = require("./lib/view.luau")
 
 local KEYS = { status = "status", refreshReq = "refresh_req", fetchReq = "fetch_req" }
 local CMD_TIMEOUT_MS = 30000
-local PUSH_TIMEOUT_MS = 60000
+local NETWORK_TIMEOUT_MS = 60000
 local DIFF_MAX_LINES = 400
+local UNPUSHED_SHOWN = 5
+-- Re-render this often while open so "fetched N min ago" stays current.
+local TICK_MS = 30000
 
 local status = noctalia.state.get(KEYS.status)
 local unchecked = {} -- path -> true; files are checked unless listed here
@@ -20,7 +24,7 @@ local expanded = {} -- path -> true
 local diffs = {} -- path -> diff text (cached while expanded)
 local message = ""
 local inputGen = 0 -- bumped to clear the message input (new key = new control)
-local confirm = nil -- nil | "push" | "commit_push"
+local confirm = nil -- nil | "push" | "commit_push" | "pull"
 local busy = nil -- nil | label of the running action
 local feedback = nil -- nil | { ok = bool, text = string }
 
@@ -46,6 +50,14 @@ local function selected()
         end
     end
     return out
+end
+
+local function plural(n, word)
+    return string.format("%d %s%s", n, word, if n == 1 then "" else "s")
+end
+
+local function notifyTitle()
+    return view.displayName(status)
 end
 
 local function setFeedback(ok, text, notifyTitle)
@@ -78,13 +90,37 @@ local function push(prefix)
     noctalia.runAsync(git.pushArgv(paths, repo()), function(r)
         busy = nil
         if r.exitCode == 0 and not r.timedOut then
-            setFeedback(true, (prefix or "") .. "Pushed to " .. (status.upstream or "upstream"), "NixOS config")
+            setFeedback(true, (prefix or "") .. "Pushed to " .. (status.upstream or "upstream"), notifyTitle())
         else
-            setFeedback(false, (prefix or "") .. "Push failed: " .. errorText(r, "git push failed"), "NixOS config")
+            setFeedback(false, (prefix or "") .. "Push failed: " .. errorText(r, "git push failed"), notifyTitle())
         end
         bump(KEYS.refreshReq)
         render()
-    end, PUSH_TIMEOUT_MS)
+    end, NETWORK_TIMEOUT_MS)
+end
+
+local function pull()
+    local n = status.behind or 0
+    busy = "Pulling…"
+    feedback = nil
+    render()
+    noctalia.runAsync(git.pullArgv(paths, repo()), function(r)
+        busy = nil
+        if r.exitCode == 0 and not r.timedOut then
+            setFeedback(true, "Fast-forwarded " .. plural(n, "commit") .. " from " .. (status.upstream or "upstream"), notifyTitle())
+        else
+            setFeedback(false, "Pull failed: " .. errorText(r, "git pull --ff-only failed"), notifyTitle())
+        end
+        bump(KEYS.refreshReq)
+        render()
+    end, NETWORK_TIMEOUT_MS)
+end
+
+local function openTerminal()
+    if not noctalia.runInTerminal(git.terminalCommand(repo())) then
+        setFeedback(false, "Could not open a terminal (set $TERMINAL)", nil)
+        render()
+    end
 end
 
 local function commit(thenPush)
@@ -99,14 +135,14 @@ local function commit(thenPush)
     noctalia.runAsync(git.addArgv(paths, repo(), git.addSpecs(sel)), function(r)
         if r.exitCode ~= 0 or r.timedOut then
             busy = nil
-            setFeedback(false, "git add failed: " .. errorText(r, "git add failed"), "NixOS config")
+            setFeedback(false, "git add failed: " .. errorText(r, "git add failed"), notifyTitle())
             render()
             return
         end
         noctalia.runAsync(git.commitArgv(paths, repo(), msg, git.commitSpecs(sel)), function(c)
             if c.exitCode ~= 0 or c.timedOut then
                 busy = nil
-                setFeedback(false, "Commit failed: " .. errorText(c, "git commit failed"), "NixOS config")
+                setFeedback(false, "Commit failed: " .. errorText(c, "git commit failed"), notifyTitle())
                 bump(KEYS.refreshReq)
                 render()
                 return
@@ -120,7 +156,7 @@ local function commit(thenPush)
                 push(committed)
             else
                 busy = nil
-                setFeedback(true, committed, "NixOS config")
+                setFeedback(true, committed, notifyTitle())
                 bump(KEYS.refreshReq)
                 render()
             end
@@ -169,7 +205,7 @@ end
 local function misconfiguredView()
     return ui.column({ key = "view:misconfigured", gap = 12, padding = 16, align = "center", justify = "center", flexGrow = 1 }, {
         ui.glyph({ name = "alert-triangle", size = 32, color = "error" }),
-        ui.label({ text = "NixOS config indicator is misconfigured", fontWeight = "bold", textAlign = "center" }),
+        ui.label({ text = view.displayName(status) .. ": git status is misconfigured", fontWeight = "bold", textAlign = "center" }),
         ui.label({
             text = (status and status.message) or "Set the repository path in the plugin settings.",
             color = "on_surface_variant",
@@ -189,39 +225,85 @@ local function misconfiguredView()
     })
 end
 
-local function header()
-    local branch = status.branch or "(detached HEAD)"
-    local target = if status.upstream then branch .. " → " .. status.upstream else branch .. " (no upstream)"
-    local chips = {
-        ui.glyph({ name = "git-branch", size = 16, color = "primary" }),
-        ui.label({ text = target, fontWeight = "bold", flexGrow = 1, maxLines = 1 }),
-    }
-    if (status.ahead or 0) > 0 then
-        table.insert(chips, ui.label({ text = "↑" .. status.ahead, color = "primary" }))
-    end
-    if (status.behind or 0) > 0 then
-        table.insert(chips, ui.label({ text = "↓" .. status.behind, color = "tertiary" }))
-    end
-    table.insert(chips, ui.button({
-        glyph = "refresh",
+local function headerButton(key, glyph, tip, onClick)
+    return ui.button({
+        key = key,
+        glyph = glyph,
         variant = "ghost",
         controlSize = "sm",
-        tooltip = "Fetch and refresh",
+        tooltip = tip,
         enabled = busy == nil,
-        onClick = function()
+        onClick = onClick,
+    })
+end
+
+local function header()
+    -- Title: the configured name, or the path when none is set (then the
+    -- path is not repeated below).
+    local hasTitle = type(status.title) == "string" and status.title ~= ""
+    local titleRow = ui.row({ key = "title-row", gap = 4, align = "center" }, {
+        ui.label({
+            text = if hasTitle then status.title else (status.repoPath or ""),
+            fontSize = 15,
+            fontWeight = "bold",
+            flexGrow = 1,
+            maxLines = 1,
+        }),
+        headerButton("btn:terminal", "terminal-2", "Open a terminal here", openTerminal),
+        headerButton("btn:refresh", "refresh", "Fetch and refresh", function()
             feedback = nil
             bump(KEYS.fetchReq)
             render()
-        end,
-    }))
-    local rows = {
-        ui.row({ gap = 8, align = "center" }, chips),
-        ui.label({ text = status.repoPath or "", fontSize = 11, color = "on_surface_variant", maxLines = 1 }),
+        end),
+    })
+
+    local branch = status.branch or "(detached HEAD)"
+    local target = if status.upstream then branch .. " → " .. status.upstream else branch .. " (no upstream)"
+    local chips = {
+        ui.glyph({ name = "git-branch", size = 14, color = "primary" }),
+        ui.label({ text = target, flexGrow = 1, maxLines = 1 }),
     }
-    if status.fetchError then
-        table.insert(rows, ui.label({ text = "Fetch failed: " .. status.fetchError, fontSize = 11, color = "error", maxLines = 2 }))
+    if (status.ahead or 0) > 0 then
+        table.insert(chips, ui.label({ text = "↑" .. status.ahead, color = "primary", fontWeight = "bold" }))
     end
-    return ui.column({ gap = 2 }, rows)
+    if (status.behind or 0) > 0 then
+        table.insert(chips, ui.label({ text = "↓" .. status.behind, color = "tertiary", fontWeight = "bold" }))
+    end
+
+    local meta = {}
+    if hasTitle and status.repoPath then
+        table.insert(meta, status.repoPath)
+    end
+    if status.upstream then
+        if status.fetchedAt then
+            table.insert(meta, "fetched " .. view.ago(noctalia.nowMs() - status.fetchedAt))
+        elseif (tonumber(noctalia.getConfig("fetch_interval_min")) or 0) == 0 then
+            table.insert(meta, "auto-fetch off")
+        else
+            table.insert(meta, "not fetched yet")
+        end
+    end
+
+    local rows = { titleRow, ui.row({ key = "branch-row", gap = 6, align = "center" }, chips) }
+    if #meta > 0 then
+        table.insert(rows, ui.label({
+            key = "meta",
+            text = table.concat(meta, " · "),
+            fontSize = 11,
+            color = "on_surface_variant",
+            maxLines = 1,
+        }))
+    end
+    if status.fetchError then
+        table.insert(rows, ui.label({
+            key = "fetch-error",
+            text = "Fetch failed: " .. status.fetchError,
+            fontSize = 11,
+            color = "error",
+            maxLines = 2,
+        }))
+    end
+    return ui.column({ key = "header", gap = 3 }, rows)
 end
 
 local function fileRow(f)
@@ -267,8 +349,7 @@ local function fileList()
     if #list == 0 then
         local text = "Working tree clean."
         if (status.behind or 0) > 0 then
-            text ..= string.format(" Behind %s by %d commit%s; pull from a terminal.",
-                status.upstream or "upstream", status.behind, if status.behind == 1 then "" else "s")
+            text ..= string.format(" Behind %s by %s.", status.upstream or "upstream", plural(status.behind, "commit"))
         end
         return ui.column({ key = "files-clean", flexGrow = 1, align = "center", justify = "center" }, {
             ui.glyph({ name = "circle-check", size = 28, color = "outline" }),
@@ -310,10 +391,12 @@ local function confirmBar()
     local dest = string.format("%s → %s", status.branch or "HEAD", status.upstream or "upstream")
     local text
     if confirm == "commit_push" then
-        text = string.format("Commit %d file%s and push %s?", nsel, if nsel == 1 then "" else "s", dest)
+        text = string.format("Commit %s and push %s?", plural(nsel, "file"), dest)
+    elseif confirm == "pull" then
+        text = string.format("Fast-forward %s to %s (%s)?", status.branch or "HEAD",
+            status.upstream or "upstream", plural(status.behind or 0, "commit"))
     else
-        local n = status.ahead or 0
-        text = string.format("Push %d commit%s %s?", n, if n == 1 then "" else "s", dest)
+        text = string.format("Push %s %s?", plural(status.ahead or 0, "commit"), dest)
     end
     -- Keyed apart from the action row it replaces: the reconciler reuses
     -- controls by position, and `enabled` is only applied when present, so an
@@ -343,6 +426,8 @@ local function confirmBar()
                 confirm = nil
                 if which == "commit_push" then
                     commit(true)
+                elseif which == "pull" then
+                    pull()
                 else
                     feedback = nil
                     push(nil)
@@ -352,12 +437,41 @@ local function confirmBar()
     })
 end
 
+-- Local commits a push would send (newest first), capped for space.
+local function unpushedList()
+    local commits = status.unpushed or {}
+    local rows = {
+        ui.label({
+            key = "unpushed-title",
+            text = "Unpushed to " .. (status.upstream or "upstream"),
+            fontSize = 11,
+            color = "on_surface_variant",
+        }),
+    }
+    for i = 1, math.min(#commits, UNPUSHED_SHOWN) do
+        local c = commits[i]
+        table.insert(rows, ui.row({ key = "commit:" .. c.hash, gap = 8, align = "center" }, {
+            ui.label({ text = c.hash, fontSize = 12, color = "primary", fontFamily = "monospace" }),
+            ui.label({ text = c.subject, fontSize = 12, flexGrow = 1, maxLines = 1 }),
+        }))
+    end
+    local more = (status.ahead or 0) - math.min(#commits, UNPUSHED_SHOWN)
+    if more > 0 then
+        table.insert(rows, ui.label({ key = "unpushed-more", text = "+ " .. more .. " more", fontSize = 11, color = "on_surface_variant" }))
+    end
+    return ui.column({ key = "unpushed", gap = 2, fill = "surface_variant/0.4", radius = 6, padding = 8 }, rows)
+end
+
 local function commitArea()
     local nsel = #selected()
     local hasMsg = noctalia.string.trim(message) ~= ""
     local canCommit = busy == nil and nsel > 0 and hasMsg
     local canPush = busy == nil and status.upstream ~= nil
     local children = {}
+
+    if (status.ahead or 0) > 0 then
+        table.insert(children, unpushedList())
+    end
 
     if #files() > 0 then
         table.insert(children, ui.input({
@@ -396,6 +510,20 @@ local function commitArea()
             fontSize = 12,
             flexGrow = 1,
         }))
+        if (status.behind or 0) > 0 then
+            table.insert(buttons, ui.button({
+                key = "btn:pull",
+                text = "Pull",
+                glyph = "download",
+                variant = "outline",
+                enabled = canPush,
+                tooltip = "Fast-forward only: never merges or rebases",
+                onClick = function()
+                    confirm = "pull"
+                    render()
+                end,
+            }))
+        end
         if (status.ahead or 0) > 0 then
             table.insert(buttons, ui.button({
                 key = "btn:push",
@@ -438,6 +566,7 @@ local function commitArea()
 
     if feedback then
         table.insert(children, ui.label({
+            key = "feedback",
             text = feedback.text,
             color = if feedback.ok then "primary" else "error",
             fontSize = 12,
@@ -495,3 +624,9 @@ function onOpen(_context)
 end
 
 render()
+
+noctalia.setUpdateInterval(TICK_MS)
+
+function update()
+    render()
+end

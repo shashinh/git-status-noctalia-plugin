@@ -7,8 +7,8 @@
 # an explicit plugins.source array replaces Noctalia's default official and
 # community sources, and TOML arrays do not merge across config files.
 #
-# Installing is not enabling: add "shashinh/nixos-dirty" to [plugins].enabled
-# and place a `type = "shashinh/nixos-dirty:dot"` widget on a bar.
+# Installing is not enabling: add "shashinh/git-status" to [plugins].enabled
+# and place a `type = "shashinh/git-status:dot"` widget on a bar.
 self:
 {
   config,
@@ -18,21 +18,21 @@ self:
 }:
 
 let
-  cfg = config.programs.noctalia-nixos-dirty;
+  cfg = config.programs.noctalia-git-status;
 in
 {
-  options.programs.noctalia-nixos-dirty = {
-    enable = lib.mkEnableOption "the nixos-dirty Noctalia plugin";
+  options.programs.noctalia-git-status = {
+    enable = lib.mkEnableOption "the git-status Noctalia plugin";
 
     package = lib.mkOption {
       type = lib.types.package;
       default = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
-      defaultText = lib.literalExpression "nixos-dirty.packages.\${system}.default";
-      description = "The nixos-dirty plugin package.";
+      defaultText = lib.literalExpression "git-status.packages.\${system}.default";
+      description = "The git-status plugin package.";
     };
   };
 
   config = lib.mkIf cfg.enable {
-    xdg.dataFile."noctalia/plugins/nixos-dirty".source = "${cfg.package}/${cfg.package.pluginDir}";
+    xdg.dataFile."noctalia/plugins/git-status".source = "${cfg.package}/${cfg.package.pluginDir}";
   };
 }

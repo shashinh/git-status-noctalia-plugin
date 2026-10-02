@@ -1,12 +1,14 @@
-# nixos-dirty
+# git-status
 
-A [Noctalia](https://github.com/noctalia-dev/noctalia) (v5+) plugin that shows,
-as a single dot in the bar, whether your NixOS configuration repository has
-uncommitted work, and lets you review, commit and push it from a panel.
+A [Noctalia](https://github.com/noctalia-dev/noctalia) (v5+) plugin that shows
+the state of a git repository as a single dot in the bar. Click the dot to
+review, commit, pull and push from a panel. A built-in **NixOS configuration
+monitor** mode watches `/etc/nixos`, so you notice an uncommitted system
+config.
 
 | | |
 |---|---|
-| Plugin id | `shashinh/nixos-dirty` |
+| Plugin id | `shashinh/git-status` |
 | Entries | bar widget `dot`, panel `panel`, service `service` |
 | Plugin API | 24 (Noctalia ≥ 5.0) |
 | License | GPL-3.0-or-later |
@@ -22,61 +24,76 @@ light/dark changes:
 | Clean, but the upstream has commits you have not pulled | `tertiary` |
 | Clean (also: not configured, still checking) | `outline` |
 
-Untracked files count as dirty on purpose: a flake cannot see files that git
-does not track.
-
-Hover for a summary (for example `3 uncommitted files · 2 behind origin/main`).
-Local commits that are not pushed yet are listed in the tooltip and the panel
-but do not color the dot.
+Untracked files count as dirty: for a Nix flake they are invisible until
+added. With *Show file count*, the number of uncommitted files appears next to
+the dot. Hover for a summary, for example `NixOS Config: 3 uncommitted files ·
+2 behind origin/main`. Unpushed commits are listed in the tooltip and the
+panel but do not color the dot.
 
 ## The panel
 
-Click the dot to open it.
-
-- **Branch line**: `branch → upstream`, ahead (↑) and behind (↓) counts, and a
-  refresh button that also runs `git fetch`.
-- **File list**: every changed or untracked file with a checkbox (checked by
-  default), its status letter, and a button that shows its diff inline.
-- **Commit**: write a message, then **Commit** (or Ctrl+Enter). Only the
-  checked files are committed, even if other files are already staged.
-- **Commit & Push**, and **Push** when you have unpushed commits. Both ask
-  for confirmation first. Push is a plain `git push` of the current branch to
-  its upstream. It never force-pushes.
+- **Header**:
+  - the title (or the repository path when no title is set)
+  - `branch → upstream` with ahead (↑) and behind (↓) counts
+  - the path and when the repo was last fetched
+  - **Open a terminal here** (uses `$TERMINAL`) and **Fetch and refresh**
+    buttons
+- **Files**: every changed or untracked file with a checkbox (checked by
+  default), its status letter, and an inline diff. **Select all / Select
+  none** toggles every checkbox.
+- **Commit**:
+  - Write a message, then click **Commit** (or press Ctrl+Enter).
+  - Only the checked files are committed, even if other files are already
+    staged.
+  - The message box and commit buttons are disabled while no file is
+    selected.
+- **Commit & Push**, plus **Push** when you have unpushed commits. Those
+  commits (hash and subject) are listed above the buttons, so you see what
+  will be sent.
+- **Pull** appears when you are behind. It runs `git pull --ff-only`, which
+  never merges or rebases: a diverged branch fails with git's message.
+- Push, Commit & Push and Pull ask for confirmation first. Push never
+  force-pushes.
 - Results appear in the panel and as a desktop notification.
 
-If the repository path is unset or unusable, the dot stays visible (even with
-*Hide when clean*), and the panel explains the problem and offers
+If the repository is not configured or unusable, the dot stays visible (even
+with *Hide when clean*), and the panel explains the problem and offers
 **Open settings**.
 
 ## Settings
 
-Plugin settings (Settings → Plugins → gear on *NixOS Dirty Indicator*):
+Plugin settings (Settings → Plugins → gear on *Git Status*):
 
 | Key | Type | Default | |
 |---|---|---|---|
-| `repo_path` | folder | *(none)* | Git checkout of your NixOS config. Required; `~` is expanded. |
+| `nixos_mode` | bool | `false` | **NixOS configuration monitor**: watch `/etc/nixos` (its symlink is followed) with the title "NixOS Config". Hides `title` and `repo_path`. |
+| `title` | string | *(blank)* | Name for the panel header, tooltip and notifications. Blank shows the path. |
+| `repo_path` | folder | *(none)* | Git checkout to watch. Required unless NixOS mode is on. `~` is expanded. |
 | `poll_interval_s` | int | `30` | Fallback `git status` interval. File changes are also detected immediately via inotify. |
 | `fetch_interval_min` | int | `10` | How often to `git fetch` for the *behind* state. `0` disables fetching. |
 
-Widget setting (in the bar widget's own settings):
+Widget settings (in the bar widget's own settings):
 
 | Key | Type | Default | |
 |---|---|---|---|
 | `hide_when_clean` | bool | `false` | Hide the dot when there is nothing to commit and the branch is not behind. |
+| `show_count` | bool | `false` | Show the number of uncommitted files next to the dot. |
+| `right_click_refresh` | bool | `false` | Right-click the dot to fetch and refresh without opening the panel. |
 
 In TOML:
 
 ```toml
 [plugins]
-enabled = [ "shashinh/nixos-dirty" ]   # plus your other plugins
+enabled = [ "shashinh/git-status" ]   # plus your other plugins
 
-[plugin_settings."shashinh/nixos-dirty"]
-repo_path = "~/system-configs"
+[plugin_settings."shashinh/git-status"]
+nixos_mode = true
+# or: repo_path = "~/src/project"  and  title = "Project"
 
-[widget.nixos_dirty]
-type = "shashinh/nixos-dirty:dot"
-hide_when_clean = false
-# ...and add "nixos_dirty" to a bar's start/center/end list.
+[widget.git_status]
+type = "shashinh/git-status:dot"
+# ...and add "git_status" to a bar's start/center/end list,
+# or add the widget from the bar editor in Noctalia's settings.
 ```
 
 ## Installing with Nix (home-manager)
@@ -85,19 +102,19 @@ The flake exports `packages.<system>.default` and `homeModules.default`.
 
 ```nix
 # flake inputs
-nixos-dirty = {
+git-status = {
   url = "github:shashinh/git-status-noctalia-plugin";
   inputs.nixpkgs.follows = "nixpkgs";
 };
 
 # home-manager configuration
 {
-  imports = [ inputs.nixos-dirty.homeModules.default ];
-  programs.noctalia-nixos-dirty.enable = true;
+  imports = [ inputs.git-status.homeModules.default ];
+  programs.noctalia-git-status.enable = true;
 }
 ```
 
-The module links the plugin into `$XDG_DATA_HOME/noctalia/plugins/nixos-dirty`.
+The module links the plugin into `$XDG_DATA_HOME/noctalia/plugins/git-status`.
 That is Noctalia's built-in *local* plugin source, which is always scanned.
 It does **not** add a `[[plugins.source]]` entry. Noctalia replaces arrays
 when it merges config files, and an explicit source list replaces the default
@@ -111,19 +128,19 @@ config files:
 
 - `[plugins] enabled`: if present, your plugin list in config is ignored.
   Delete the key, or enable from the GUI or with
-  `noctalia msg plugins enable shashinh/nixos-dirty`.
+  `noctalia msg plugins enable shashinh/git-status`.
 - `[bar.<name>] start/center/end`: if present, the widget is defined but
-  not placed. Add `nixos_dirty` to that list too, or delete it.
+  not placed. Add `git_status` to that list too, or delete it.
 
 The package pins `git`, `inotify-tools` and `coreutils` by store path. `ssh`
-for fetch and push comes from your `PATH` and uses the session's
+for fetch, pull and push comes from your `PATH` and uses the session's
 `SSH_AUTH_SOCK`. Network commands never prompt: they run with
 `GIT_TERMINAL_PROMPT=0` and `ssh -o BatchMode=yes`, and fail instead of
 hanging. A key that needs unlocking must already be in your agent.
 
 ### Without Nix
 
-Copy or symlink the `nixos-dirty/` directory into
+Copy or symlink the `git-status/` directory into
 `~/.local/share/noctalia/plugins/`. `git` and `inotifywait` are then looked up
 on `PATH`. Without `inotifywait`, changes are picked up on the poll interval
 only.
@@ -136,12 +153,13 @@ luau tests/run.luau  # unit tests (parsers, config, view, service loop)
 nix flake check      # tests + syntax check of every script + manifest + package build
 ```
 
-Live development: symlink the checkout into the local plugin source. Scripts
+Live development: symlink the built package (or the checkout, if `git` and
+`inotifywait` are on your `PATH`) into the local plugin source. Scripts
 hot-reload on save. Manifest changes apply on the next config reload.
 
 ```sh
-ln -s "$PWD/nixos-dirty" ~/.local/share/noctalia/plugins/nixos-dirty
-noctalia msg plugins enable shashinh/nixos-dirty
+nix build && ln -sfn "$PWD/result/share/noctalia/plugins/git-status" ~/.local/share/noctalia/plugins/git-status
+noctalia msg plugins enable shashinh/git-status
 ```
 
 Remove the symlink before switching to the home-manager module, which wants to
@@ -150,14 +168,14 @@ own that path.
 Layout:
 
 ```
-nixos-dirty/            the plugin (installed as-is)
+git-status/             the plugin (installed as-is)
   plugin.toml           manifest and settings schema
   service.luau          background loop: inotify + poll + fetch, publishes state
   dot.luau              bar widget
-  panel.luau            review / commit / push UI
-  lib/git.luau          porcelain v2 parser, argv builders (pure)
-  lib/config.luau       settings → validated config (pure)
-  lib/view.luau         status → dot color/tooltip (pure)
+  panel.luau            review / commit / pull / push UI
+  lib/git.luau          porcelain v2 + log parsers, argv builders (pure)
+  lib/config.luau       settings → validated config, NixOS mode (pure)
+  lib/view.luau         status → dot color/tooltip/count (pure)
   lib/service_core.luau service logic with injected host (unit-tested)
   lib/paths.luau        executable paths, substituted by package.nix
 tests/                  luau CLI tests with a fake noctalia host
@@ -167,31 +185,31 @@ nix/hm-module.nix       home-manager module
 
 How it works: the service is the only entry that reads git. It runs
 `git --no-optional-locks status --porcelain=v2 --branch -z`, so status checks
-never rewrite `.git/index` and re-trigger the watcher. It also keeps an
+never rewrite `.git/index` and re-trigger the watcher. When the branch is
+ahead, it also lists the commits a push would send. It keeps an
 `inotifywait -m -r` stream on the repo, which ignores `.git/objects`, logs and
 lock files. Events are debounced to at most one refresh per second. The result
 is published on `noctalia.state`, where the dot and the panel watch it. The
-panel runs commit and push itself (argv form only; nothing goes through a
-shell), then asks the service to refresh.
+panel runs commit, pull and push itself (argv form only; nothing goes through
+a shell), then asks the service to refresh.
+
+UI note for contributors: Noctalia's declarative reconciler reuses native
+controls by position and applies `enabled` only when the prop is present. Give
+rows and buttons a `key`, and always pass `enabled` explicitly.
 
 ## Roadmap
 
-Not in v0, but planned:
-
-- **Open repo in terminal/editor**: a panel button that launches
-  `$TERMINAL` or your editor in the repository.
-- **Rebuild after commit**: an opt-in action to run `nixos-rebuild switch`
-  in a terminal after committing, since it needs sudo. Pairs well with
+- **Multiple repositories**: one widget instance per repo. Settings are
+  plugin-wide today, and the service and panel are singletons.
+- **Rebuild after commit** (NixOS mode): an opt-in action to run
+  `nixos-rebuild switch` in a terminal after committing. Pairs well with
   [`mindnbytes/nix-status`](https://github.com/noctalia-dev/community-plugins/tree/main/nix-status),
   which shows when the running system differs from the configured one.
-- **Discard changes per file**: revert a file from the panel, behind a
-  confirmation.
-- Pull/rebase when behind (currently: pull from a terminal).
+- **Discard changes per file**, behind a confirmation.
 
-Related: `mindnbytes/nix-status` watches *system* state (booted vs current
-generation, configured vs active system, flake input updates). This plugin
-watches the *repository* state. The two do not overlap and work well side by
-side.
+Related: `mindnbytes/nix-status` watches NixOS *system* state (booted vs
+current generation, configured vs active system, flake input updates). This
+plugin watches *repository* state. The two complement each other.
 
 ## License
 

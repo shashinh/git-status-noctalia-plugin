@@ -1,5 +1,5 @@
-nixos-dirty - a Noctalia plugin that indicates uncommitted changes in a
-NixOS configuration repository.
+git-status - a Noctalia plugin that shows the working-tree status of a git
+repository, with commit, pull and push.
 Copyright (C) 2026 Shashin Halalingaiah <sshashinn@gmail.com>
 
 This program is free software: you can redistribute it and/or modify

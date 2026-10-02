@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Shashin Halalingaiah
 
-id           = "shashinh/nixos-dirty"
-name         = "NixOS Dirty Indicator"
-version      = "0.1.0"
+id           = "shashinh/git-status"
+name         = "Git Status"
+version      = "0.2.0"
 # Highest feature used: argv-form runAsync (direct-argv, 24). Also relies on
 # module-require (22), plugin-ui-props (21), open-settings (15),
 # system-stats/nowMs (12) and ui-callback-closures (9).
@@ -11,15 +11,31 @@ plugin_api   = 24
 author       = "shashinh"
 license      = "GPL-3.0-or-later"
 icon         = "git-branch"
-description  = "A bar dot showing uncommitted changes in your NixOS config repo, with a panel to review, commit and push."
+description  = "A bar dot showing uncommitted changes in a git repository, with a panel to review, commit, pull and push. Includes a NixOS configuration mode."
 tags         = ["bar", "panel", "service", "indicator", "git", "nixos"]
 dependencies = ["git", "inotify-tools"]
+
+[[setting]]
+key             = "nixos_mode"
+type            = "bool"
+label_key       = "settings.nixos_mode.label"
+description_key = "settings.nixos_mode.description"
+default         = false
+
+[[setting]]
+key             = "title"
+type            = "string"
+label_key       = "settings.title.label"
+description_key = "settings.title.description"
+default         = ""
+visible_when    = { key = "nixos_mode", values = [false] }
 
 [[setting]]
 key             = "repo_path"
 type            = "folder"
 label_key       = "settings.repo_path.label"
 description_key = "settings.repo_path.description"
+visible_when    = { key = "nixos_mode", values = [false] }
 
 [[setting]]
 key             = "poll_interval_s"
@@ -54,11 +70,25 @@ entry = "dot.luau"
   description_key = "settings.hide_when_clean.description"
   default         = false
 
+  [[widget.setting]]
+  key             = "show_count"
+  type            = "bool"
+  label_key       = "settings.show_count.label"
+  description_key = "settings.show_count.description"
+  default         = false
+
+  [[widget.setting]]
+  key             = "right_click_refresh"
+  type            = "bool"
+  label_key       = "settings.right_click_refresh.label"
+  description_key = "settings.right_click_refresh.description"
+  default         = false
+
 [[panel]]
 id              = "panel"
 entry           = "panel.luau"
-width           = 540
-height          = 580
+width           = 560
+height          = 620
 placement       = "attached"
 position        = "auto"
 open_near_click = true

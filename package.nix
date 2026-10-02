@@ -9,15 +9,15 @@
 }:
 
 let
-  manifest = lib.importTOML ./nixos-dirty/plugin.toml;
+  manifest = lib.importTOML ./git-status/plugin.toml;
 in
 stdenvNoCC.mkDerivation {
-  pname = "noctalia-plugin-nixos-dirty";
+  pname = "noctalia-plugin-git-status";
   inherit (manifest) version;
 
   src = lib.fileset.toSource {
     root = ./.;
-    fileset = ./nixos-dirty;
+    fileset = ./git-status;
   };
 
   dontConfigure = true;
@@ -27,9 +27,9 @@ stdenvNoCC.mkDerivation {
   # whose immediate subdirectories contain a plugin.toml.
   installPhase = ''
     runHook preInstall
-    dest=$out/share/noctalia/plugins/nixos-dirty
+    dest=$out/share/noctalia/plugins/git-status
     mkdir -p "$dest"
-    cp -r nixos-dirty/. "$dest/"
+    cp -r git-status/. "$dest/"
     substituteInPlace "$dest/lib/paths.luau" \
       --replace-fail '@git@' '${lib.getExe git}' \
       --replace-fail '@inotifywait@' '${inotify-tools}/bin/inotifywait' \
@@ -37,10 +37,10 @@ stdenvNoCC.mkDerivation {
     runHook postInstall
   '';
 
-  passthru.pluginDir = "share/noctalia/plugins/nixos-dirty";
+  passthru.pluginDir = "share/noctalia/plugins/git-status";
 
   meta = {
-    description = "Noctalia bar plugin indicating uncommitted changes in a NixOS config repository";
+    description = "Noctalia bar plugin showing git working-tree status, with commit, pull and push";
     homepage = "https://github.com/shashinh/git-status-noctalia-plugin";
     license = lib.licenses.gpl3Plus;
     # Not yet in nixpkgs' maintainer-list; add the handle here when upstreaming.

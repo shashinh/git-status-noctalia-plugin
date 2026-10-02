@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Shashin Halalingaiah
 {
-  description = "nixos-dirty: a Noctalia plugin indicating uncommitted changes in a NixOS config repo";
+  description = "git-status: a Noctalia plugin showing git working-tree status, with commit, pull and push";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
@@ -28,32 +28,32 @@
           src = lib.fileset.toSource {
             root = ./.;
             fileset = lib.fileset.unions [
-              ./nixos-dirty
+              ./git-status
               ./tests
             ];
           };
-          manifest = lib.importTOML ./nixos-dirty/plugin.toml;
-          translations = lib.importJSON ./nixos-dirty/translations/en.json;
+          manifest = lib.importTOML ./git-status/plugin.toml;
+          translations = lib.importJSON ./git-status/translations/en.json;
         in
         {
           package = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
 
           # Unit tests plus a syntax check of every script.
-          luau = pkgs.runCommandLocal "nixos-dirty-luau-tests" { nativeBuildInputs = [ pkgs.luau ]; } ''
+          luau = pkgs.runCommandLocal "git-status-luau-tests" { nativeBuildInputs = [ pkgs.luau ]; } ''
             cd ${src}
             luau tests/run.luau
-            find nixos-dirty -name '*.luau' -print0 | xargs -0 luau-compile --null
+            find git-status -name '*.luau' -print0 | xargs -0 luau-compile --null
             touch $out
           '';
 
           # Manifest/translation sanity, evaluated at check time.
           manifest =
-            assert manifest.id == "shashinh/nixos-dirty";
+            assert manifest.id == "shashinh/git-status";
             assert builtins.match "[0-9]+\\.[0-9]+\\.[0-9]+" manifest.version != null;
             assert lib.all (s: lib.hasAttrByPath (lib.splitString "." s.label_key) translations) (
               manifest.setting ++ lib.concatMap (w: w.setting or [ ]) manifest.widget
             );
-            pkgs.runCommandLocal "nixos-dirty-manifest" { } "touch $out";
+            pkgs.runCommandLocal "git-status-manifest" { } "touch $out";
         }
       );
 

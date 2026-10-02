@@ -1,0 +1,36 @@
+{
+  "settings": {
+    "nixos_mode": {
+      "label": "NixOS configuration monitor",
+      "description": "Watch /etc/nixos (following its symlink to your config checkout) and title the panel \"NixOS Config\". Hides the title and repository path settings."
+    },
+    "title": {
+      "label": "Title",
+      "description": "Name shown in the panel header and the tooltip. Leave blank to show the repository path."
+    },
+    "repo_path": {
+      "label": "Repository path",
+      "description": "Git checkout to watch (for example ~/src/project). The indicator stays inactive until this is set."
+    },
+    "poll_interval_s": {
+      "label": "Poll interval (seconds)",
+      "description": "Fallback git status check. File changes are also picked up immediately via inotify."
+    },
+    "fetch_interval_min": {
+      "label": "Fetch interval (minutes)",
+      "description": "How often to git fetch to detect when the upstream is ahead. 0 disables fetching."
+    },
+    "hide_when_clean": {
+      "label": "Hide when clean",
+      "description": "Hide the dot when there are no uncommitted changes and the branch is not behind its upstream. A misconfigured indicator is always shown."
+    },
+    "show_count": {
+      "label": "Show file count",
+      "description": "Show the number of uncommitted files next to the dot."
+    },
+    "right_click_refresh": {
+      "label": "Right-click to fetch",
+      "description": "Right-clicking the dot runs git fetch and refreshes the status without opening the panel."
+    }
+  }
+}

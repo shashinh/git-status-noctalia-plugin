@@ -28,7 +28,7 @@ M.FETCH_TIMEOUT_MS = 60000
 
 -- Printed by the watcher's shell wrapper when inotifywait exits, so the
 -- service can notice a dead watcher (runStream has no exit callback).
-M.WATCH_EXIT = "__nixos_dirty_watch_exit__"
+M.WATCH_EXIT = "__git_status_watch_exit__"
 
 -- Ignore git's object store, logs and lock files: they churn on every git
 -- command without changing what status reports.
@@ -49,6 +49,7 @@ function M.start(host: any, deps: Deps)
     local watchAlive, watchDirty = false, false
     local lastPoll, lastFetch, lastWatchStart = 0, 0, -math.huge
     local fetchError: string? = nil
+    local fetchedAt: number? = nil -- nowMs() of the last successful fetch
     local hasUpstream = false
     local stamp = 0
 
@@ -56,11 +57,24 @@ function M.start(host: any, deps: Deps)
         stamp += 1
         s.stamp = stamp
         s.repoPath = cfg.repoPath
+        s.title = cfg.title
         s.fetchError = fetchError
+        s.fetchedAt = fetchedAt
+        s.unpushed = s.unpushed or {}
         host.state.set(M.KEYS.status, s)
     end
 
-    local function refresh()
+    local refresh -- forward declaration (the completion handler recurses)
+
+    local function statusDone()
+        statusRunning = false
+        if statusPending then
+            statusPending = false
+            refresh()
+        end
+    end
+
+    refresh = function()
         if cfg.state ~= "configured" then
             publish({ state = cfg.state, message = cfg.message, ahead = 0, behind = 0, files = {} })
             return
@@ -72,7 +86,6 @@ function M.start(host: any, deps: Deps)
         statusRunning = true
         lastPoll = host.nowMs()
         host.runAsync(git.statusArgv(paths, cfg.repoPath), function(r)
-            statusRunning = false
             if r.exitCode ~= 0 or r.timedOut then
                 hasUpstream = false
                 local why = if r.timedOut then "git status timed out" else git.firstLine(r.stderr)
@@ -83,9 +96,12 @@ function M.start(host: any, deps: Deps)
                     behind = 0,
                     files = {},
                 })
-            else
-                local st = git.parseStatus(r.stdout)
-                hasUpstream = st.upstream ~= nil
+                statusDone()
+                return
+            end
+            local st = git.parseStatus(r.stdout)
+            hasUpstream = st.upstream ~= nil
+            local function finish(unpushed)
                 publish({
                     state = "ok",
                     branch = st.branch,
@@ -94,12 +110,18 @@ function M.start(host: any, deps: Deps)
                     behind = st.behind,
                     files = st.files,
                     dirty = #st.files > 0,
+                    unpushed = unpushed,
                 })
+                statusDone()
             end
-            if statusPending then
-                statusPending = false
-                refresh()
+            if st.ahead == 0 then
+                finish({})
+                return
             end
+            -- Ahead: also list the commits a push would send.
+            host.runAsync(git.unpushedArgv(paths, cfg.repoPath), function(l)
+                finish(if l.exitCode == 0 and not l.timedOut then git.parseLog(l.stdout) else {})
+            end, M.STATUS_TIMEOUT_MS)
         end, M.STATUS_TIMEOUT_MS)
     end
 
@@ -120,6 +142,7 @@ function M.start(host: any, deps: Deps)
                 host.log("fetch failed: " .. tostring(fetchError))
             else
                 fetchError = nil
+                fetchedAt = host.nowMs()
             end
             refresh()
             if fetchPending then
