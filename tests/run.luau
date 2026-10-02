@@ -6,6 +6,8 @@ local t = require("./testlib")
 require("./git_test")
 require("./config_test")
 require("./view_test")
+require("./instances_test")
+require("./repo_monitor_test")
 require("./service_test")
 
 t.run()

@@ -3,14 +3,23 @@
 
 -- Popup: list uncommitted files (each with a checkbox and an inline diff),
 -- commit the checked ones, and pull (fast-forward) or push after an inline
--- confirmation. Git state comes from the service via noctalia.state; this
--- entry only runs the commands the user asks for, then requests a refresh.
+-- confirmation. One panel serves every bar widget instance: the clicked dot
+-- writes `panel_target` ({ repo, title, state, message }) before toggling,
+-- and the panel shows that repo's status (published by the service under
+-- config.statusKey(repo)). This entry only runs the commands the user asks
+-- for, then requests a refresh for that repo.
 
+local config = require("./lib/config.luau")
 local git = require("./lib/git.luau")
 local paths = require("./lib/paths.luau")
 local view = require("./lib/view.luau")
 
-local KEYS = { status = "status", refreshReq = "refresh_req", fetchReq = "fetch_req" }
+local KEYS = {
+    target = "panel_target",
+    showing = "panel_showing",
+    refreshReq = "refresh_req",
+    fetchReq = "fetch_req",
+}
 local CMD_TIMEOUT_MS = 30000
 local NETWORK_TIMEOUT_MS = 60000
 local DIFF_MAX_LINES = 400
@@ -18,7 +27,9 @@ local UNPUSHED_SHOWN = 5
 -- Re-render this often while open so "fetched N min ago" stays current.
 local TICK_MS = 30000
 
-local status = noctalia.state.get(KEYS.status)
+local target = noctalia.state.get(KEYS.target) or {}
+local status = nil
+local watched = {} -- status keys with a registered watch
 local unchecked = {} -- path -> true; files are checked unless listed here
 local expanded = {} -- path -> true
 local diffs = {} -- path -> diff text (cached while expanded)
@@ -31,11 +42,13 @@ local feedback = nil -- nil | { ok = bool, text = string }
 local render -- forward declaration
 
 local function bump(key)
-    noctalia.state.set(key, (noctalia.state.get(key) or 0) + 1)
+    local prev = noctalia.state.get(key)
+    local seq = if type(prev) == "table" then (prev.seq or 0) + 1 else 1
+    noctalia.state.set(key, { repo = target.repo, seq = seq })
 end
 
 local function repo()
-    return status and status.repoPath
+    return target.repo
 end
 
 local function files()
@@ -57,7 +70,7 @@ local function plural(n, word)
 end
 
 local function notifyTitle()
-    return view.displayName(status)
+    return view.displayName(target.title, target.repo)
 end
 
 local function setFeedback(ok, text, notifyTitle)
@@ -203,24 +216,29 @@ local function codeColor(code)
 end
 
 local function misconfiguredView()
+    -- Either the instance has no usable path, or git says it is not a repo.
+    local why = if target.state ~= "configured"
+        then target.message
+        else (status and status.message)
     return ui.column({ key = "view:misconfigured", gap = 12, padding = 16, align = "center", justify = "center", flexGrow = 1 }, {
         ui.glyph({ name = "alert-triangle", size = 32, color = "error" }),
-        ui.label({ text = view.displayName(status) .. ": git status is misconfigured", fontWeight = "bold", textAlign = "center" }),
         ui.label({
-            text = (status and status.message) or "Set the repository path in the plugin settings.",
+            text = notifyTitle() .. ": git status is misconfigured",
+            fontWeight = "bold",
+            textAlign = "center",
+        }),
+        ui.label({
+            text = why or "Set the repository path (or NixOS mode) in this widget's settings.",
             color = "on_surface_variant",
             textAlign = "center",
             maxWidth = 440,
         }),
-        ui.button({
-            key = "btn:settings",
-            text = "Open settings",
-            glyph = "settings",
-            variant = "primary",
-            enabled = true,
-            onClick = function()
-                noctalia.openSettings()
-            end,
+        ui.label({
+            text = "Repository, title, NixOS mode and glyph are per-widget settings: middle-click the dot to open them.",
+            fontSize = 12,
+            color = "on_surface_variant",
+            textAlign = "center",
+            maxWidth = 440,
         }),
     })
 end
@@ -240,10 +258,10 @@ end
 local function header()
     -- Title: the configured name, or the path when none is set (then the
     -- path is not repeated below).
-    local hasTitle = type(status.title) == "string" and status.title ~= ""
+    local hasTitle = type(target.title) == "string" and target.title ~= ""
     local titleRow = ui.row({ key = "title-row", gap = 4, align = "center" }, {
         ui.label({
-            text = if hasTitle then status.title else (status.repoPath or ""),
+            text = if hasTitle then target.title else (target.repo or ""),
             fontSize = 15,
             fontWeight = "bold",
             flexGrow = 1,
@@ -271,8 +289,8 @@ local function header()
     end
 
     local meta = {}
-    if hasTitle and status.repoPath then
-        table.insert(meta, status.repoPath)
+    if hasTitle and target.repo then
+        table.insert(meta, target.repo)
     end
     if status.upstream then
         if status.fetchedAt then
@@ -579,7 +597,7 @@ end
 render = function()
     local state = status and status.state
     local body
-    if state == "unconfigured" or state == "invalid" then
+    if target.state ~= "configured" or state == "invalid" then
         body = misconfiguredView()
     elseif state ~= "ok" then
         body = ui.column({ key = "view:loading", flexGrow = 1, align = "center", justify = "center" }, {
@@ -597,7 +615,7 @@ render = function()
     panel.render(ui.column({ padding = 14, gap = 10, flexGrow = 1 }, { body }))
 end
 
-noctalia.state.watch(KEYS.status, function(value)
+local function onStatus(value)
     status = value
     -- Drop UI state for files that no longer exist.
     local present = {}
@@ -615,14 +633,48 @@ noctalia.state.watch(KEYS.status, function(value)
         end
     end
     render()
-end)
+end
+
+-- Point the panel at whatever the clicked dot wrote to `panel_target`.
+-- Watches cannot be removed, so each repo's key is watched once and the
+-- handler ignores repos other than the current target.
+local function retarget()
+    local newTarget = noctalia.state.get(KEYS.target) or {}
+    if newTarget.repo ~= target.repo then
+        unchecked, expanded, diffs = {}, {}, {}
+        message, inputGen, feedback = "", inputGen + 1, nil
+    end
+    target = newTarget
+    status = nil
+    if target.repo then
+        local key = config.statusKey(target.repo)
+        status = noctalia.state.get(key)
+        if not watched[key] then
+            watched[key] = true
+            noctalia.state.watch(key, function(value)
+                if target.repo and config.statusKey(target.repo) == key then
+                    onStatus(value)
+                end
+            end)
+        end
+    end
+end
 
 function onOpen(_context)
+    retarget()
     confirm = nil
-    bump(KEYS.refreshReq)
+    noctalia.state.set(KEYS.showing, config.targetId(target.repo, target.title))
+    if target.repo then
+        bump(KEYS.refreshReq)
+    end
     render()
 end
 
+function onClose()
+    noctalia.state.set(KEYS.showing, "")
+end
+
+retarget()
 render()
 
 noctalia.setUpdateInterval(TICK_MS)

@@ -4,6 +4,8 @@
 local t = require("./testlib")
 local view = require("../git-status/lib/view")
 
+local CFG = { state = "configured", repoPath = "/home/u/src/project", nixos = false, glyph = "" }
+
 local function ok(extra)
     local s = { state = "ok", ahead = 0, behind = 0, files = {}, upstream = "origin/main" }
     for k, v in extra or {} do
@@ -13,61 +15,68 @@ local function ok(extra)
 end
 
 t.test("dirty repo uses the error role", function()
-    local ind = view.indicator(ok({ files = { { path = "a" } } }))
+    local ind = view.indicator(CFG, ok({ files = { { path = "a" } } }))
     t.eq(ind.role, "error")
     t.eq(ind.clean, false)
-    t.eq(ind.tooltip, "Git: 1 uncommitted file")
+    t.eq(ind.count, 1)
+    t.eq(ind.tooltip, "project: 1 uncommitted file")
 end)
 
 t.test("behind-only uses the tertiary role", function()
-    local ind = view.indicator(ok({ behind = 2 }))
+    local ind = view.indicator(CFG, ok({ behind = 2 }))
     t.eq(ind.role, "tertiary")
-    t.eq(ind.clean, false)
-    t.eq(ind.tooltip, "Git: 2 behind origin/main")
+    t.eq(ind.tooltip, "project: 2 behind origin/main")
 end)
 
 t.test("dirty wins over behind", function()
-    t.eq(view.indicator(ok({ behind = 1, files = { { path = "a" }, { path = "b" } } })).role, "error")
+    t.eq(view.indicator(CFG, ok({ behind = 1, files = { { path = "a" } } })).role, "error")
 end)
 
 t.test("clean repo is inactive and hideable", function()
-    local ind = view.indicator(ok())
+    local ind = view.indicator(CFG, ok())
     t.eq(ind.role, "outline")
     t.eq(view.hidden(ind, true), true)
     t.eq(view.hidden(ind, false), false)
 end)
 
 t.test("ahead-only is clean but mentioned", function()
-    local ind = view.indicator(ok({ ahead = 1 }))
+    local ind = view.indicator(CFG, ok({ ahead = 1 }))
     t.eq(ind.clean, true)
-    t.eq(ind.tooltip, "Git: 1 unpushed commit")
+    t.eq(ind.tooltip, "project: 1 unpushed commit")
 end)
 
-t.test("misconfigured is inactive and never hidden", function()
-    for _, state in { "unconfigured", "invalid" } do
-        local ind = view.indicator({ state = state })
-        t.eq(ind.role, "outline")
-        t.eq(ind.misconfigured, true)
-        t.eq(view.hidden(ind, true), false)
-    end
+t.test("instance title names the tooltip", function()
+    local cfg = table.clone(CFG)
+    cfg.title = "Dots"
+    t.eq(view.indicator(cfg, ok({ files = { { path = "a" } } })).tooltip, "Dots: 1 uncommitted file")
 end)
 
-t.test("loading or missing status is inactive", function()
-    t.eq(view.indicator(nil).role, "outline")
-    t.eq(view.indicator({ state = "loading" }).role, "outline")
+t.test("unusable instance config or git failure is misconfigured and never hidden", function()
+    local bad = { state = "unconfigured", nixos = false, glyph = "" }
+    local ind = view.indicator(bad, nil)
+    t.eq(ind.misconfigured, true)
+    t.eq(view.hidden(ind, true), false)
+    t.eq(ind.tooltip, "Git: misconfigured (click for details)")
+    t.eq(view.indicator(CFG, { state = "invalid" }).misconfigured, true)
 end)
 
-
-t.test("display name prefers title, then folder name", function()
-    t.eq(view.displayName({ title = "NixOS Config", repoPath = "/etc/nixos" }), "NixOS Config")
-    t.eq(view.displayName({ repoPath = "/home/u/src/project/" }), "project")
-    t.eq(view.indicator(ok({ title = "Dots", files = { { path = "a" } } })).tooltip, "Dots: 1 uncommitted file")
-    t.eq(view.indicator({ state = "invalid", repoPath = "/x/y" }).tooltip, "y: misconfigured (click for details)")
+t.test("no status yet is inactive and checking", function()
+    local ind = view.indicator(CFG, nil)
+    t.eq(ind.role, "outline")
+    t.eq(ind.tooltip, "project: checking…")
 end)
 
-t.test("indicator reports the file count", function()
-    t.eq(view.indicator(ok({ files = { { path = "a" }, { path = "b" } } })).count, 2)
-    t.eq(view.indicator({ state = "loading" }).count, 0)
+t.test("glyphFor: dot by default, snowflake in NixOS mode, explicit wins", function()
+    t.eq(view.glyphFor({ glyph = "", nixos = false }), nil)
+    t.eq(view.glyphFor({ glyph = "", nixos = true }), "snowflake")
+    t.eq(view.glyphFor({ glyph = "brand-git", nixos = true }), "brand-git")
+    t.eq(view.glyphFor({ glyph = "folder", nixos = false }), "folder")
+end)
+
+t.test("displayName falls back to the folder name, then Git", function()
+    t.eq(view.displayName("T", "/a/b"), "T")
+    t.eq(view.displayName(nil, "/a/b/"), "b")
+    t.eq(view.displayName("", nil), "Git")
 end)
 
 t.test("ago formats coarse ages", function()

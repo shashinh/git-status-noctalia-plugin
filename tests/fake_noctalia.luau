@@ -18,10 +18,17 @@ function M.new(opts: { [string]: any }?)
         published = {},
         watchers = {},
         values = {},
+        widgets = opts.widgets, -- what getSetting("widget") returns
     }
 
     function host.nowMs() return host.now end
     function host.getConfig(key) return host.config[key] end
+    function host.getSetting(path)
+        if path == "widget" then
+            return host.widgets
+        end
+        return nil
+    end
     function host.expandPath(p) return (string.gsub(p, "^~", "/home/test")) end
     function host.fileInfo(p)
         if host.dirs[p] then
@@ -42,8 +49,8 @@ function M.new(opts: { [string]: any }?)
     host.state = {}
     function host.state.set(key, value)
         host.values[key] = value
-        if key == "status" then
-            table.insert(host.published, value)
+        if string.sub(key, 1, 7) == "status:" then
+            table.insert(host.published, { key = key, value = value })
         end
         for _, fn in host.watchers[key] or {} do
             fn(value)
@@ -58,7 +65,7 @@ function M.new(opts: { [string]: any }?)
     -- Complete the oldest pending command whose argv contains `needle`.
     function host.complete(needle: string, result: { [string]: any })
         for i, c in host.calls do
-            if table.find(c.argv, needle) then
+            if c.cb and table.find(c.argv, needle) then
                 table.remove(host.calls, i)
                 c.cb({
                     exitCode = result.exitCode or 0,
@@ -75,14 +82,34 @@ function M.new(opts: { [string]: any }?)
     function host.pending(needle: string): number
         local n = 0
         for _, c in host.calls do
-            if table.find(c.argv, needle) then
+            if c.cb and table.find(c.argv, needle) then
                 n += 1
             end
         end
         return n
     end
 
-    function host.last() return host.published[#host.published] end
+    -- Latest status published (optionally for one repo key).
+    function host.last(key: string?)
+        for i = #host.published, 1, -1 do
+            local p = host.published[i]
+            if key == nil or p.key == key then
+                return p.value
+            end
+        end
+        return nil
+    end
+
+    -- Fire-and-forget commands (no callback), e.g. kill.
+    function host.detached(needle: string): number
+        local n = 0
+        for _, c in host.calls do
+            if c.cb == nil and table.find(c.argv, needle) then
+                n += 1
+            end
+        end
+        return n
+    end
 
     return host
 end

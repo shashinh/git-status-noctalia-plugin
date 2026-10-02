@@ -2,27 +2,31 @@
   "settings": {
     "nixos_mode": {
       "label": "NixOS configuration monitor",
-      "description": "Watch /etc/nixos (following its symlink to your config checkout) and title the panel \"NixOS Config\". Hides the title and repository path settings."
+      "description": "Watch /etc/nixos (following its symlink to your config checkout) with the title \"NixOS Config\" and a snowflake glyph. Hides the title and repository path settings."
     },
     "title": {
       "label": "Title",
-      "description": "Name shown in the panel header and the tooltip. Leave blank to show the repository path."
+      "description": "Name shown in the panel header, the tooltip and notifications. Leave blank to show the repository path."
     },
     "repo_path": {
       "label": "Repository path",
-      "description": "Git checkout to watch (for example ~/src/project). The indicator stays inactive until this is set."
+      "description": "Git checkout this dot watches (for example ~/src/project). The dot stays inactive until this is set."
+    },
+    "glyph": {
+      "label": "Glyph",
+      "description": "Icon drawn instead of the dot, to tell several dots apart. Leave empty for the dot (a snowflake in NixOS mode). Colored by status like the dot."
     },
     "poll_interval_s": {
       "label": "Poll interval (seconds)",
-      "description": "Fallback git status check. File changes are also picked up immediately via inotify."
+      "description": "Fallback git status check for every watched repository. File changes are also picked up immediately via inotify."
     },
     "fetch_interval_min": {
       "label": "Fetch interval (minutes)",
-      "description": "How often to git fetch to detect when the upstream is ahead. 0 disables fetching."
+      "description": "How often to git fetch each repository to detect when its upstream is ahead. 0 disables fetching."
     },
     "hide_when_clean": {
       "label": "Hide when clean",
-      "description": "Hide the dot when there are no uncommitted changes and the branch is not behind its upstream. A misconfigured indicator is always shown."
+      "description": "Hide the dot when there are no uncommitted changes and the branch is not behind its upstream. A misconfigured dot is always shown."
     },
     "show_count": {
       "label": "Show file count",

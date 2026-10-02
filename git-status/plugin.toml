@@ -3,39 +3,20 @@
 
 id           = "shashinh/git-status"
 name         = "Git Status"
-version      = "0.2.0"
-# Highest feature used: argv-form runAsync (direct-argv, 24). Also relies on
-# module-require (22), plugin-ui-props (21), open-settings (15),
+version      = "0.3.0"
+# Highest feature used: getSetting (get-setting, 26), which the service uses
+# to find every bar widget instance and its repository. Also relies on
+# direct-argv (24), module-require (22), plugin-ui-props (21),
 # system-stats/nowMs (12) and ui-callback-closures (9).
-plugin_api   = 24
+plugin_api   = 26
 author       = "shashinh"
 license      = "GPL-3.0-or-later"
 icon         = "git-branch"
-description  = "A bar dot showing uncommitted changes in a git repository, with a panel to review, commit, pull and push. Includes a NixOS configuration mode."
+description  = "Bar dots showing uncommitted changes in git repositories (one repo per widget, each with its own glyph), with a panel to review, commit, pull and push. Includes a NixOS configuration mode."
 tags         = ["bar", "panel", "service", "indicator", "git", "nixos"]
 dependencies = ["git", "inotify-tools"]
 
-[[setting]]
-key             = "nixos_mode"
-type            = "bool"
-label_key       = "settings.nixos_mode.label"
-description_key = "settings.nixos_mode.description"
-default         = false
-
-[[setting]]
-key             = "title"
-type            = "string"
-label_key       = "settings.title.label"
-description_key = "settings.title.description"
-default         = ""
-visible_when    = { key = "nixos_mode", values = [false] }
-
-[[setting]]
-key             = "repo_path"
-type            = "folder"
-label_key       = "settings.repo_path.label"
-description_key = "settings.repo_path.description"
-visible_when    = { key = "nixos_mode", values = [false] }
+# Plugin-wide: how often every watched repository is checked.
 
 [[setting]]
 key             = "poll_interval_s"
@@ -59,9 +40,40 @@ max             = 1440
 id    = "service"
 entry = "service.luau"
 
+# Per widget instance: each dot watches its own repository.
+
 [[widget]]
 id    = "dot"
 entry = "dot.luau"
+
+  [[widget.setting]]
+  key             = "nixos_mode"
+  type            = "bool"
+  label_key       = "settings.nixos_mode.label"
+  description_key = "settings.nixos_mode.description"
+  default         = false
+
+  [[widget.setting]]
+  key             = "title"
+  type            = "string"
+  label_key       = "settings.title.label"
+  description_key = "settings.title.description"
+  default         = ""
+  visible_when    = { key = "nixos_mode", values = [false] }
+
+  [[widget.setting]]
+  key             = "repo_path"
+  type            = "folder"
+  label_key       = "settings.repo_path.label"
+  description_key = "settings.repo_path.description"
+  visible_when    = { key = "nixos_mode", values = [false] }
+
+  [[widget.setting]]
+  key             = "glyph"
+  type            = "glyph"
+  label_key       = "settings.glyph.label"
+  description_key = "settings.glyph.description"
+  default         = ""
 
   [[widget.setting]]
   key             = "hide_when_clean"

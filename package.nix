@@ -33,7 +33,8 @@ stdenvNoCC.mkDerivation {
     substituteInPlace "$dest/lib/paths.luau" \
       --replace-fail '@git@' '${lib.getExe git}' \
       --replace-fail '@inotifywait@' '${inotify-tools}/bin/inotifywait' \
-      --replace-fail '@env@' '${coreutils}/bin/env'
+      --replace-fail '@env@' '${coreutils}/bin/env' \
+      --replace-fail '@kill@' '${coreutils}/bin/kill'
     runHook postInstall
   '';
 

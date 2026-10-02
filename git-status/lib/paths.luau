@@ -16,4 +16,5 @@ return {
     git = pick("@git@", "git"),
     inotifywait = pick("@inotifywait@", "inotifywait"),
     env = pick("@env@", "env"),
+    kill = pick("@kill@", "kill"),
 }
