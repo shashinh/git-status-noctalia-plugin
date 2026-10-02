@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Shashin Halalingaiah
+
+id           = "shashinh/nixos-dirty"
+name         = "NixOS Dirty Indicator"
+version      = "0.1.0"
+# Highest feature used: argv-form runAsync (direct-argv, 24). Also relies on
+# module-require (22), plugin-ui-props (21), open-settings (15),
+# system-stats/nowMs (12) and ui-callback-closures (9).
+plugin_api   = 24
+author       = "shashinh"
+license      = "GPL-3.0-or-later"
+icon         = "git-branch"
+description  = "A bar dot showing uncommitted changes in your NixOS config repo, with a panel to review, commit and push."
+tags         = ["bar", "panel", "service", "indicator", "git", "nixos"]
+dependencies = ["git", "inotify-tools"]
+
+[[setting]]
+key             = "repo_path"
+type            = "folder"
+label_key       = "settings.repo_path.label"
+description_key = "settings.repo_path.description"
+
+[[setting]]
+key             = "poll_interval_s"
+type            = "int"
+label_key       = "settings.poll_interval_s.label"
+description_key = "settings.poll_interval_s.description"
+default         = 30
+min             = 5
+max             = 3600
+
+[[setting]]
+key             = "fetch_interval_min"
+type            = "int"
+label_key       = "settings.fetch_interval_min.label"
+description_key = "settings.fetch_interval_min.description"
+default         = 10
+min             = 0
+max             = 1440
+
+[[service]]
+id    = "service"
+entry = "service.luau"
+
+[[widget]]
+id    = "dot"
+entry = "dot.luau"
+
+  [[widget.setting]]
+  key             = "hide_when_clean"
+  type            = "bool"
+  label_key       = "settings.hide_when_clean.label"
+  description_key = "settings.hide_when_clean.description"
+  default         = false
+
+[[panel]]
+id              = "panel"
+entry           = "panel.luau"
+width           = 540
+height          = 580
+placement       = "attached"
+position        = "auto"
+open_near_click = true

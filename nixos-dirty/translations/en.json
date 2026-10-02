@@ -1,0 +1,20 @@
+{
+  "settings": {
+    "repo_path": {
+      "label": "Repository path",
+      "description": "Git checkout of your NixOS configuration (for example ~/system-configs). The indicator stays inactive until this is set."
+    },
+    "poll_interval_s": {
+      "label": "Poll interval (seconds)",
+      "description": "Fallback git status check. File changes are also picked up immediately via inotify."
+    },
+    "fetch_interval_min": {
+      "label": "Fetch interval (minutes)",
+      "description": "How often to git fetch to detect when the upstream is ahead. 0 disables fetching."
+    },
+    "hide_when_clean": {
+      "label": "Hide when clean",
+      "description": "Hide the dot when there are no uncommitted changes and the branch is not behind its upstream. A misconfigured indicator is always shown."
+    }
+  }
+}
